@@ -306,6 +306,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	reply.Success = true
+	rf.resetTimer()
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -440,6 +441,8 @@ func (rf *Raft) timeout() {
 		rf.votedFor = rf.me
 		rf.votedNum = 1
 
+		rf.debug("i am Candidate")
+
 		args := RequestVoteArgs{Term: rf.currentTerm, CandidateId: rf.me, LastLogIndex: rf.lastLogIndex(), LastLogTerm: rf.lastLogTerm()}
 
 		for server := range rf.peers {
@@ -475,6 +478,8 @@ func (rf *Raft) heartsbeats() {
 			if rf.role != Leader {
 				return
 			}
+
+			rf.debug("heartsbeats")
 
 			args := AppendEntriesArgs{PreLogIndex: rf.lastLogIndex(), PreLogTerm: rf.lastLogTerm(), Term: rf.currentTerm, LeaderId: rf.me}
 
