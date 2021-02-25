@@ -349,9 +349,19 @@ func (rf *Raft) handleAppendReply(reply AppendEntriesReply) {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
-	isLeader := true
+	isLeader := false
 
 	// Your code here (2B).
+	//2A
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if rf.role == Leader {
+		rf.log = append(rf.log, Entry{command: command, term: rf.currentTerm, index: rf.lastLogIndex() + 1})
+		index = rf.lastLogIndex()
+		term = rf.currentTerm
+		isLeader = true
+	}
 
 	return index, term, isLeader
 }
