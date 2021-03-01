@@ -98,7 +98,7 @@ type Raft struct {
 	applyCh     chan ApplyMsg
 
 	//2D
-	snapshot []byte
+	//snapshot []byte
 }
 
 //2D
@@ -146,6 +146,18 @@ func (rf *Raft) GetState() (int, bool) {
 	return term, isleader
 }
 
+//2D
+func (rf *Raft) raftState() []byte {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.log)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.commitIndex)
+	e.Encode(rf.lastApplied)
+	return w.Bytes()
+}
+
 //
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
@@ -161,18 +173,18 @@ func (rf *Raft) persist() {
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
 	//2C
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-	e.Encode(rf.currentTerm)
-	e.Encode(rf.log)
-	e.Encode(rf.votedFor)
-	e.Encode(rf.commitIndex)
-	e.Encode(rf.lastApplied)
+	//w := new(bytes.Buffer)
+	//e := labgob.NewEncoder(w)
+	//e.Encode(rf.currentTerm)
+	//e.Encode(rf.log)
+	//e.Encode(rf.votedFor)
+	//e.Encode(rf.commitIndex)
+	//e.Encode(rf.lastApplied)
 	//2D
-	e.Encode(rf.snapshot)
+	//e.Encode(rf.snapshot)
 	//e.Encode(rf.lastIncludedIndex)
 	//e.Encode(rf.lastIncludedTerm)
-	rf.persister.SaveRaftState(w.Bytes())
+	rf.persister.SaveRaftState(rf.raftState())
 	//rf.debug("persist term %v log %v voteFor %v commitIndex %v lastApplied %v", rf.currentTerm, rf.log, rf.votedFor, rf.commitIndex, rf.lastApplied)
 }
 
@@ -218,9 +230,9 @@ func (rf *Raft) readPersist(data []byte) {
 		panic(err)
 	}
 	//2D
-	if err = d.Decode(&rf.snapshot); err != nil {
-		panic(err)
-	}
+	//if err = d.Decode(&rf.snapshot); err != nil {
+	//panic(err)
+	//}
 	rf.debug("readPersist term %v log %v voteFor %v commitIndex %v lastApplied %v", rf.currentTerm, rf.log, rf.votedFor, rf.commitIndex, rf.lastApplied)
 }
 
@@ -241,7 +253,18 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
+	//2D
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 
+	if index <= rf.lastIncludedIndex() {
+		return
+	}
+
+	//rf.snapshot = snapshot
+	ind := rf.indexInLog(index)
+	rf.log = rf.log[ind:]
+	rf.debug("snapshot index %v snapshot %v", index, snapshot)
 }
 
 //2D
@@ -277,15 +300,16 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		return
 	}
 
-	rf.snapshot = args.Data
-
 	ind := rf.indexInLog(args.LastIncludedIndex)
+	rf.commitIndex = max(rf.commitIndex, args.LastIncludedIndex)
 
 	if ind < len(rf.log) && rf.log[ind].Term == args.LastIncludedTerm {
 		rf.log = rf.log[ind:]
 	} else {
-		rf.log = []Entry{Entry{Command: nil, Term: args.LastIncludedIndex, Index: args.LastIncludedTerm}}
+		rf.log = []Entry{{Command: nil, Term: args.LastIncludedIndex, Index: args.LastIncludedTerm}}
 	}
+
+	rf.persister.SaveStateAndSnapshot(rf.raftState(), args.Data)
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
@@ -530,7 +554,7 @@ func (rf *Raft) applyEntries() {
 		//rf.mu.Lock()
 		//rf.debug("applyEntries applyMsg %+v", applyMsg)
 		//rf.mu.Unlock()
-		//rf.applyCh <- applyMsg
+		//rf., index, snapshotapplyCh <- applyMsg
 		//}
 
 		for _, applyMsg := range applyMsgs {
