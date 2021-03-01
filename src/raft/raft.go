@@ -96,6 +96,25 @@ type Raft struct {
 	nextIndex   []int
 	matchIndex  []int
 	applyCh     chan ApplyMsg
+
+	//2D
+	snapshot []byte
+}
+
+//2D
+func (rf *Raft) lastIncludedIndex() int {
+	return rf.log[0].Index
+}
+
+func (rf *Raft) lastIncludedTerm() int {
+	return rf.log[0].Term
+}
+
+func (rf *Raft) indexInLog(index int) int {
+	if index < rf.lastIncludedIndex() {
+		return -1
+	}
+	return index - rf.lastIncludedIndex()
 }
 
 func max(x int, y int) int {
@@ -149,6 +168,10 @@ func (rf *Raft) persist() {
 	e.Encode(rf.votedFor)
 	e.Encode(rf.commitIndex)
 	e.Encode(rf.lastApplied)
+	//2D
+	e.Encode(rf.snapshot)
+	//e.Encode(rf.lastIncludedIndex)
+	//e.Encode(rf.lastIncludedTerm)
 	rf.persister.SaveRaftState(w.Bytes())
 	//rf.debug("persist term %v log %v voteFor %v commitIndex %v lastApplied %v", rf.currentTerm, rf.log, rf.votedFor, rf.commitIndex, rf.lastApplied)
 }
@@ -194,6 +217,10 @@ func (rf *Raft) readPersist(data []byte) {
 	if err = d.Decode(&rf.lastApplied); err != nil {
 		panic(err)
 	}
+	//2D
+	if err = d.Decode(&rf.snapshot); err != nil {
+		panic(err)
+	}
 	rf.debug("readPersist term %v log %v voteFor %v commitIndex %v lastApplied %v", rf.currentTerm, rf.log, rf.votedFor, rf.commitIndex, rf.lastApplied)
 }
 
@@ -215,6 +242,58 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
 
+}
+
+//2D
+type InstallSnapshotArgs struct {
+	Term              int
+	LeaderId          int
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Data              []byte
+}
+
+type InstallSnapshotReply struct {
+	term int
+}
+
+func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	reply.term = rf.currentTerm
+
+	if args.Term < rf.currentTerm {
+		return
+	}
+
+	if args.Term > rf.currentTerm {
+		rf.initToFollower(args.Term, true)
+		reply.term = rf.currentTerm
+		return
+	}
+
+	if rf.lastIncludedIndex() >= args.LastIncludedIndex {
+		return
+	}
+
+	rf.snapshot = args.Data
+
+	ind := rf.indexInLog(args.LastIncludedIndex)
+
+	if ind < len(rf.log) && rf.log[ind].Term == args.LastIncludedTerm {
+		rf.log = rf.log[ind:]
+	} else {
+		rf.log = []Entry{Entry{Command: nil, Term: args.LastIncludedIndex, Index: args.LastIncludedTerm}}
+	}
+}
+
+func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
+	rf.mu.Lock()
+	rf.debug("sendInstallSnapshot server %v args %+v", server, args)
+	rf.mu.Unlock()
+	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
+	return ok
 }
 
 //
