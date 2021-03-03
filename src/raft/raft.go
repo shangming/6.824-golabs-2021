@@ -766,9 +766,10 @@ func (rf *Raft) sendAppendEntriesTo(server int) {
 		args := AppendEntriesArgs{LeaderCommit: rf.commitIndex, Entries: make([]Entry, 0), Term: rf.currentTerm, LeaderId: rf.me, PreLogIndex: rf.lastLogIndex(), PreLogTerm: rf.lastLogTerm()}
 
 		if rf.lastLogIndex() >= rf.nextIndex[server] {
-			args.Entries = append(args.Entries, rf.log[rf.nextIndex[server]:]...)
-			args.PreLogIndex = rf.log[rf.nextIndex[server]-1].Index
-			args.PreLogTerm = rf.log[rf.nextIndex[server]-1].Term
+			ind := rf.indexInLog(rf.nextIndex[server])
+			args.Entries = append(args.Entries, rf.log[ind:]...)
+			args.PreLogIndex = rf.log[ind-1].Index
+			args.PreLogTerm = rf.log[ind-1].Term
 		}
 
 		go func(server int, args AppendEntriesArgs) {
