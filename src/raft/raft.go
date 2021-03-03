@@ -485,7 +485,7 @@ type AppendEntriesReply struct {
 func (rf *Raft) updateApplyMsgs() {
 	if rf.commitIndex > rf.lastApplied {
 		for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-			rf.applyMsgs = append(rf.applyMsgs, ApplyMsg{CommandValid: true, Command: rf.log[i].Command, CommandIndex: i})
+			rf.applyMsgs = append(rf.applyMsgs, ApplyMsg{CommandValid: true, Command: rf.log[rf.indexInLog(i)].Command, CommandIndex: i})
 		}
 		rf.lastApplied = rf.commitIndex
 	}
@@ -520,12 +520,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	//ind := rf.indexInLog(args.PreLogIndex)
-
-	if rf.log[args.PreLogIndex].Term != args.PreLogTerm {
-		reply.ConflictTerm = rf.log[args.PreLogIndex].Term
+	if args.PreLogIndex > rf.lastIncludedIndex() && rf.log[rf.indexInLog(args.PreLogIndex)].Term != args.PreLogTerm {
+		reply.ConflictTerm = rf.log[rf.indexInLog(args.PreLogIndex)].Term
 		reply.ConflictIndex = args.PreLogIndex
-		for reply.ConflictIndex > 1 && rf.log[reply.ConflictIndex-1].Term == reply.ConflictTerm {
+		for reply.ConflictIndex > rf.lastIncludedIndex() && rf.log[rf.indexInLog(reply.ConflictIndex-1)].Term == reply.ConflictTerm {
 			reply.ConflictIndex--
 		}
 		return
@@ -534,17 +532,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.persist()
 
 	for _, entry := range args.Entries {
-		if entry.Index >= len(rf.log) {
+		ind := rf.indexInLog(entry.Index)
+		if ind <= 0 {
+			continue
+		}
+		if ind >= len(rf.log) {
 			rf.log = append(rf.log, entry)
 		} else {
-			if rf.log[entry.Index].Term != entry.Term {
-				rf.log = append(rf.log[0:entry.Index], entry)
+			if rf.log[ind].Term != entry.Term {
+				rf.log = append(rf.log[0:ind], entry)
 			}
 		}
 	}
 
 	if args.LeaderCommit > rf.commitIndex {
-		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
+		rf.commitIndex = min(args.LeaderCommit, rf.lastLogIndex())
 		rf.updateApplyMsgs()
 	}
 
@@ -684,8 +686,8 @@ func (rf *Raft) handleAppendReply(server int, reply AppendEntriesReply, args App
 	} else {
 		if reply.ConflictTerm != -1 {
 			conflictTermIndex := -1
-			for i := args.PreLogIndex; i >= 1 && rf.log[i].Term >= reply.ConflictTerm; i-- {
-				if rf.log[i].Term == reply.ConflictTerm {
+			for i := args.PreLogIndex; i > rf.lastIncludedIndex() && rf.log[rf.indexInLog(i)].Term >= reply.ConflictTerm; i-- {
+				if rf.log[rf.indexInLog(i)].Term == reply.ConflictTerm {
 					conflictTermIndex = i
 					break
 				}
