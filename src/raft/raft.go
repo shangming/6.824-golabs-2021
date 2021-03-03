@@ -99,6 +99,7 @@ type Raft struct {
 
 	//2D
 	//snapshot []byte
+	applyMsgs []ApplyMsg
 }
 
 //2D
@@ -111,9 +112,6 @@ func (rf *Raft) lastIncludedTerm() int {
 }
 
 func (rf *Raft) indexInLog(index int) int {
-	if index < rf.lastIncludedIndex() {
-		return -1
-	}
 	return index - rf.lastIncludedIndex()
 }
 
@@ -155,6 +153,7 @@ func (rf *Raft) raftState() []byte {
 	e.Encode(rf.votedFor)
 	e.Encode(rf.commitIndex)
 	e.Encode(rf.lastApplied)
+	e.Encode(rf.applyMsgs)
 	return w.Bytes()
 }
 
@@ -230,41 +229,10 @@ func (rf *Raft) readPersist(data []byte) {
 		panic(err)
 	}
 	//2D
-	//if err = d.Decode(&rf.snapshot); err != nil {
-	//panic(err)
-	//}
-	rf.debug("readPersist term %v log %v voteFor %v commitIndex %v lastApplied %v", rf.currentTerm, rf.log, rf.votedFor, rf.commitIndex, rf.lastApplied)
-}
-
-//
-// A service wants to switch to snapshot.  Only do so if Raft hasn't
-// have more recent info since it communicate the snapshot on applyCh.
-//
-func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-
-	// Your code here (2D).
-
-	return true
-}
-
-// the service says it has created a snapshot that has
-// all info up to and including index. this means the
-// service no longer needs the log through (and including)
-// that index. Raft should now trim its log as much as possible.
-func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (2D).
-	//2D
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	if index <= rf.lastIncludedIndex() {
-		return
+	if err = d.Decode(&rf.applyMsgs); err != nil {
+		panic(err)
 	}
-
-	//rf.snapshot = snapshot
-	ind := rf.indexInLog(index)
-	rf.log = rf.log[ind:]
-	rf.debug("snapshot index %v snapshot %v", index, snapshot)
+	rf.debug("readPersist term %v log %v voteFor %v commitIndex %v lastApplied %v", rf.currentTerm, rf.log, rf.votedFor, rf.commitIndex, rf.lastApplied)
 }
 
 //2D
@@ -293,23 +261,19 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	if args.Term > rf.currentTerm {
 		rf.initToFollower(args.Term, true)
 		reply.term = rf.currentTerm
-		return
 	}
 
 	if rf.lastIncludedIndex() >= args.LastIncludedIndex {
 		return
 	}
 
-	ind := rf.indexInLog(args.LastIncludedIndex)
-	rf.commitIndex = max(rf.commitIndex, args.LastIncludedIndex)
-
-	if ind < len(rf.log) && rf.log[ind].Term == args.LastIncludedTerm {
-		rf.log = rf.log[ind:]
-	} else {
-		rf.log = []Entry{{Command: nil, Term: args.LastIncludedIndex, Index: args.LastIncludedTerm}}
+	if rf.lastApplied >= args.LastIncludedIndex {
+		return
 	}
 
-	rf.persister.SaveStateAndSnapshot(rf.raftState(), args.Data)
+	rf.applyMsgs = append(rf.applyMsgs, ApplyMsg{SnapshotValid: true, Snapshot: args.Data, SnapshotTerm: args.LastIncludedTerm, SnapshotIndex: args.LastIncludedIndex})
+	rf.persist()
+
 }
 
 func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
@@ -318,6 +282,61 @@ func (rf *Raft) sendInstallSnapshot(server int, args *InstallSnapshotArgs, reply
 	rf.mu.Unlock()
 	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
 	return ok
+}
+
+//
+// A service wants to switch to snapshot.  Only do so if Raft hasn't
+// have more recent info since it communicate the snapshot on applyCh.
+//
+func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
+
+	// Your code here (2D).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if rf.lastIncludedIndex() >= lastIncludedIndex {
+		return false
+	}
+
+	if rf.lastApplied >= lastIncludedIndex {
+		return false
+	}
+
+	ind := rf.indexInLog(lastIncludedIndex)
+	//rf.commitIndex = max(rf.commitIndex, lastIncludedIndex)
+
+	if ind >= 0 && len(rf.log) > ind && rf.log[ind].Term == lastIncludedTerm {
+		rf.log = rf.log[ind:]
+	} else {
+		rf.log = []Entry{{Command: nil, Term: lastIncludedIndex, Index: lastIncludedTerm}}
+	}
+
+	rf.commitIndex = max(rf.commitIndex, lastIncludedIndex)
+	rf.lastApplied = lastIncludedIndex
+
+	rf.persister.SaveStateAndSnapshot(rf.raftState(), snapshot)
+
+	return true
+}
+
+// the service says it has created a snapshot that has
+// all info up to and including index. this means the
+// service no longer needs the log through (and including)
+// that index. Raft should now trim its log as much as possible.
+func (rf *Raft) Snapshot(index int, snapshot []byte) {
+	// Your code here (2D).
+	//2D
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if index <= rf.lastIncludedIndex() {
+		return
+	}
+
+	//rf.snapshot = snapshot
+	ind := rf.indexInLog(index)
+	rf.log = rf.log[ind:]
+	rf.debug("snapshot index %v snapshot %v", index, snapshot)
 }
 
 //
@@ -515,6 +534,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, rf.log[len(rf.log)-1].Index)
+		if rf.commitIndex > rf.lastApplied {
+			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
+				rf.applyMsgs = append(rf.applyMsgs, ApplyMsg{CommandValid: true, Command: rf.log[i].Command, CommandIndex: i})
+			}
+			rf.lastApplied = rf.commitIndex
+			//2C
+			rf.persist()
+		}
 		persist = true
 	}
 
@@ -531,7 +558,7 @@ func (rf *Raft) applyEntries() {
 	for rf.killed() == false {
 		time.Sleep(time.Millisecond * time.Duration(10))
 
-		applyMsgs := make([]ApplyMsg, 0)
+		var applyMsgs []ApplyMsg
 
 		rf.mu.Lock()
 		//if rf.commitIndex > rf.lastApplied {
@@ -540,14 +567,17 @@ func (rf *Raft) applyEntries() {
 		//applyMsg.Command = rf.log[rf.lastApplied].Command
 		//applyMsg.CommandIndex = rf.lastApplied
 		//}
-		if rf.commitIndex > rf.lastApplied {
-			for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-				applyMsgs = append(applyMsgs, ApplyMsg{CommandValid: true, Command: rf.log[i].Command, CommandIndex: i})
-			}
-			rf.lastApplied = rf.commitIndex
-			//2C
-			rf.persist()
-		}
+		//if rf.commitIndex > rf.lastApplied {
+		//for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
+		//applyMsgs = append(applyMsgs, ApplyMsg{CommandValid: true, Command: rf.log[i].Command, CommandIndex: i})
+		//}
+		//rf.lastApplied = rf.commitIndex
+		////2C
+		//rf.persist()
+		//}
+		applyMsgs = rf.applyMsgs
+		rf.applyMsgs = make([]ApplyMsg, 0)
+		rf.persist()
 		rf.mu.Unlock()
 
 		//if applyMsg.CommandValid {
