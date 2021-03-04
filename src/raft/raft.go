@@ -184,7 +184,7 @@ func (rf *Raft) persist() {
 	//e.Encode(rf.lastIncludedIndex)
 	//e.Encode(rf.lastIncludedTerm)
 	rf.persister.SaveRaftState(rf.raftState())
-	//rf.debug("persist term %v log %v voteFor %v commitIndex %v lastApplied %v", rf.currentTerm, rf.log, rf.votedFor, rf.commitIndex, rf.lastApplied)
+	rf.debug("persist term %v log %v voteFor %v commitIndex %v lastApplied %v", rf.currentTerm, rf.log, rf.votedFor, rf.commitIndex, rf.lastApplied)
 }
 
 //
@@ -273,8 +273,6 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		return
 	}
 
-	//rf.applyMsgs = append(rf.applyMsgs, ApplyMsg{SnapshotValid: true, Snapshot: args.Data, SnapshotTerm: args.LastIncludedTerm, SnapshotIndex: args.LastIncludedIndex})
-	//rf.persist()
 	ind := rf.indexInLog(args.LastIncludedIndex)
 
 	if ind > 0 && ind < len(rf.log) && rf.log[ind].Term == args.LastIncludedTerm {
@@ -284,7 +282,6 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 
 	rf.commitIndex = max(rf.commitIndex, args.LastIncludedIndex)
-	//rf.updateApplyMsgs()
 
 	rf.persister.SaveStateAndSnapshot(rf.raftState(), args.Data)
 
@@ -317,28 +314,6 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	defer rf.persist()
 
 	rf.lastApplied = lastIncludedIndex
-
-	//if rf.lastIncludedIndex() >= lastIncludedIndex {
-	//return false
-	//}
-
-	//if rf.lastApplied >= lastIncludedIndex {
-	//return false
-	//}
-
-	//ind := rf.indexInLog(lastIncludedIndex)
-
-	//if ind >= 0 && ind < len(rf.log) && rf.log[ind].Term == lastIncludedTerm {
-	//rf.log = rf.log[ind:]
-	//} else {
-	//rf.log = []Entry{{Command: nil, Term: lastIncludedIndex, Index: lastIncludedTerm}}
-	//}
-
-	//rf.commitIndex = max(rf.commitIndex, lastIncludedIndex)
-	//rf.lastApplied = lastIncludedIndex
-	//rf.updateApplyMsgs()
-
-	//rf.persister.SaveStateAndSnapshot(rf.raftState(), snapshot)
 
 	return true
 }
@@ -508,15 +483,6 @@ type AppendEntriesReply struct {
 	ConflictIndex int
 }
 
-//func (rf *Raft) updateApplyMsgs() {
-//if rf.commitIndex > rf.lastApplied {
-//for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-//rf.applyMsgs = append(rf.applyMsgs, ApplyMsg{CommandValid: true, Command: rf.log[rf.indexInLog(i)].Command, CommandIndex: i})
-//}
-//rf.lastApplied = rf.commitIndex
-//}
-//}
-
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 
 	//2A
@@ -573,7 +539,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	if args.LeaderCommit > rf.commitIndex {
 		rf.commitIndex = min(args.LeaderCommit, rf.lastLogIndex())
-		//rf.updateApplyMsgs()
 	}
 
 	reply.Success = true
@@ -603,18 +568,6 @@ func (rf *Raft) applyEntries() {
 			}
 		}
 		rf.mu.Unlock()
-		//if rf.commitIndex > rf.lastApplied {
-		//for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
-		//applyMsgs = append(applyMsgs, ApplyMsg{CommandValid: true, Command: rf.log[i].Command, CommandIndex: i})
-		//}
-		//rf.lastApplied = rf.commitIndex
-		////2C
-		//rf.persist()
-		//}
-		//applyMsgs = rf.applyMsgs
-		//rf.applyMsgs = make([]ApplyMsg, 0)
-		//rf.persist()
-		//rf.mu.Unlock()
 
 		if applyMsg.CommandValid || applyMsg.SnapshotValid {
 			rf.mu.Lock()
@@ -622,13 +575,6 @@ func (rf *Raft) applyEntries() {
 			rf.mu.Unlock()
 			rf.applyCh <- applyMsg
 		}
-
-		//for _, applyMsg := range applyMsgs {
-		//rf.mu.Lock()
-		//rf.debug("applyEntries applyMsg %+v", applyMsg)
-		//rf.mu.Unlock()
-		//rf.applyCh <- applyMsg
-		//}
 	}
 }
 
@@ -683,7 +629,6 @@ func (rf *Raft) updateCommitIndex(n int) {
 		}
 		if num > rf.majorityNum() {
 			rf.commitIndex = n
-			//rf.updateApplyMsgs()
 			return
 		}
 		n--
