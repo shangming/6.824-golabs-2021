@@ -280,7 +280,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	if ind > 0 && ind < len(rf.log) && rf.log[ind].Term == args.LastIncludedTerm {
 		rf.log = rf.log[ind:]
 	} else {
-		rf.log = []Entry{{Command: nil, Term: args.LastIncludedIndex, Index: args.LastIncludedTerm}}
+		rf.log = []Entry{{Command: nil, Term: args.LastIncludedTerm, Index: args.LastIncludedIndex}}
 	}
 
 	rf.commitIndex = max(rf.commitIndex, args.LastIncludedIndex)
@@ -416,7 +416,7 @@ func (rf *Raft) InitToLeader() {
 }
 
 func (rf *Raft) debug(s string, args ...interface{}) {
-	DPrintf("[%v] [t:%v,l:%v,c:%v,e:%v,a:%v] %s", rf.me, rf.currentTerm, rf.role == Leader, rf.commitIndex, rf.lastLogIndex(), rf.lastApplied, fmt.Sprintf(s, args...))
+	DPrintf("[%v] [t:%v,l:%v,c:%v,e:%v,a:%v,i:%v] %s", rf.me, rf.currentTerm, rf.role == Leader, rf.commitIndex, rf.lastLogIndex(), rf.lastApplied, rf.lastIncludedIndex(), fmt.Sprintf(s, args...))
 }
 
 //
