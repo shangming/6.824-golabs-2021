@@ -252,6 +252,8 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	rf.debug("installSnapshot args %+v reply %+v", args, reply)
+
 	reply.Term = rf.currentTerm
 
 	if args.Term < rf.currentTerm {
@@ -294,6 +296,8 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	rf.debug("condInstallSnaptshot lastIncludedIndex %v lastIncludedTerm %v snapshot %v", lastIncludedIndex, lastIncludedTerm, snapshot)
+
 	if rf.lastIncludedIndex() >= lastIncludedIndex {
 		return false
 	}
@@ -328,6 +332,8 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	//2D
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
+	rf.debug("snapshot index %v snapshot %v", index, snapshot)
 
 	ind := rf.indexInLog(index)
 
@@ -608,6 +614,8 @@ func (rf *Raft) handleSnapshotReply(server int, reply InstallSnapshotReply, args
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	rf.debug("handleSnapshotReply server %v reply %+v args %+v", server, reply, args)
+
 	if reply.Term < rf.currentTerm {
 		return
 	}
@@ -633,7 +641,7 @@ func (rf *Raft) handleSnapshotReply(server int, reply InstallSnapshotReply, args
 
 func (rf *Raft) updateCommitIndex(n int) {
 
-	for n > rf.commitIndex && rf.log[n].Term == rf.currentTerm {
+	for n > rf.commitIndex && rf.log[rf.indexInLog(n)].Term == rf.currentTerm {
 		num := 1
 		for server := range rf.peers {
 			if server == rf.me {
@@ -753,7 +761,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 func (rf *Raft) sendAppendEntriesTo(server int) {
 
 	if rf.nextIndex[server] <= rf.lastIncludedIndex() {
-		args := InstallSnapshotArgs{Term: rf.currentTerm, LeaderId: rf.me, LastIncludedIndex: rf.lastIncludedIndex(), LastIncludedTerm: rf.lastIncludedTerm()}
+		args := InstallSnapshotArgs{Term: rf.currentTerm, LeaderId: rf.me, LastIncludedIndex: rf.lastIncludedIndex(), LastIncludedTerm: rf.lastIncludedTerm(), Data: rf.persister.ReadSnapshot()}
 
 		go func(server int, args InstallSnapshotArgs) {
 			var reply InstallSnapshotReply
